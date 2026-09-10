@@ -23,4 +23,5 @@ export const WORLD = {
   cell: 16,          // block + street pitch
   street: 5,         // street width
   boulevard: 21,     // width of the central north-south boulevard (kept free of buildings)
+  horizonHalf: 640,  // surrounding districts end beyond the visible fog horizon
 };

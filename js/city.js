@@ -312,6 +312,54 @@ function makeHologram(texture) {
   return new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
 }
 
+// Continue the original skyline in every direction. Keep a separate seed so
+// adding distant districts never changes the central buildings or neon signs.
+function makeSurroundingCity(group, coreHalf, material) {
+  const random = mulberry32(20260910);
+  const range = (a, b) => a + random() * (b - a);
+  const C = WORLD.cell;
+  const blocks = Math.ceil(WORLD.horizonHalf / C);
+  const blockW = C - WORLD.street;
+  const specs = [];
+  for (let i = -blocks; i <= blocks; i++) {
+    for (let j = -blocks; j <= blocks; j++) {
+      const x = i * C, z = j * C;
+      if (Math.abs(x) <= coreHalf && Math.abs(z) <= coreHalf) continue;
+      if (Math.abs(x) < WORLD.boulevard / 2 + blockW / 2) continue;
+
+      // Low buildings meet the old perimeter; varied clusters rise behind them
+      // instead of forming a uniform wall around the original city.
+      const depth = Math.max(Math.abs(x), Math.abs(z)) - coreHalf;
+      const blend = THREE.MathUtils.smoothstep(depth, 0, C * 8);
+      const district = 0.5 + 0.5 * Math.sin(x * 0.019 + 1.4) * Math.cos(z * 0.023);
+      const h = range(6, 16) + blend * range(14, 60) * district;
+      const w = blockW - range(0.8, 2.4);
+      const d = blockW - range(0.8, 2.4);
+      specs.push({ x, z, w, d, h });
+      if (h > 36 && random() < 0.3) {
+        specs.push({ x, z, w: w * 0.55, d: d * 0.55, h: h + range(5, 16) });
+      }
+    }
+  }
+  const geometry = new THREE.BoxGeometry(1, 1, 1);
+  const buildings = new THREE.InstancedMesh(geometry, material, specs.length);
+  buildings.name = 'surrounding-districts';
+  const seeds = new Float32Array(specs.length);
+  const matrix = new THREE.Matrix4();
+  const color = new THREE.Color();
+  specs.forEach((s, k) => {
+    matrix.makeScale(s.w, s.h, s.d);
+    matrix.setPosition(s.x, s.h / 2, s.z);
+    buildings.setMatrixAt(k, matrix);
+    color.setHSL(range(0.62, 0.7), 0.35, range(0.05, 0.11));
+    buildings.setColorAt(k, color);
+    seeds[k] = Math.floor(random() * 200);
+  });
+  geometry.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seeds, 1));
+  // One extra draw call, with no extra shadow pass for the distant districts.
+  group.add(buildings);
+}
+
 // ---------- main builder ----------
 export function buildCity(scene, renderer) {
   const group = new THREE.Group();
@@ -393,8 +441,8 @@ export function buildCity(scene, renderer) {
   }
   // boulevard guide lines
   for (let s = -1; s <= 1; s += 2) {
-    edges.push({ x: s * (B - 0.5), z: 0, len: N * C, rot: Math.PI / 2, c: new THREE.Color(0.2, 1.6, 2.0) });
-    edges.push({ x: s * 2.5, z: 0, len: N * C, rot: Math.PI / 2, c: new THREE.Color(1.8, 0.7, 0.2) });
+    edges.push({ x: s * (B - 0.5), z: 0, len: WORLD.horizonHalf * 2, rot: Math.PI / 2, c: new THREE.Color(0.2, 1.6, 2.0) });
+    edges.push({ x: s * 2.5, z: 0, len: WORLD.horizonHalf * 2, rot: Math.PI / 2, c: new THREE.Color(1.8, 0.7, 0.2) });
   }
   const eMesh = new THREE.InstancedMesh(edgeGeo, edgeMat, edges.length);
   edges.forEach((e, k) => {
@@ -571,7 +619,8 @@ export function buildCity(scene, renderer) {
   group.add(beam);
 
   // --- ground ---
-  const ground = makeGround(scene, renderer, N * C + 200);
+  makeSurroundingCity(group, half, bMat);
+  const ground = makeGround(scene, renderer, WORLD.horizonHalf * 2 + C * 2);
 
   // --- lights ---
   const hemi = new THREE.HemisphereLight(0x2a3d6b, 0x05060c, 0.55);
